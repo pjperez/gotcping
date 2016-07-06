@@ -5,18 +5,19 @@ import (
   "fmt"
   "net"
   "flag"
+  "time"
   "strconv"
 )
 
 func usage(filename string) {
-  fmt.Println(fmt.Sprintf("Usage: %s <host> <port>", filename))
+  fmt.Println(fmt.Sprintf("Usage: %s [-t timeout_second] <host> <port>", filename))
 }
 
 func main() {
-  flag.Parse()
-
   filename := os.Args[0]
 
+  var timeout = flag.Int("t", 10, "timeout second")
+  flag.Parse()
   args := flag.Args()
   if len(args) < 2 {
     fmt.Println("Argument Miss")
@@ -39,7 +40,7 @@ func main() {
 
   addr := fmt.Sprintf("%s:%d", host, port)
 
-  _, err = net.Dial("tcp", addr)
+  _, err = net.DialTimeout("tcp", addr, time.Second * time.Duration(*timeout))
   if err != nil {
     fmt.Println(fmt.Sprintf("%s port %d closed.", host, port))
     os.Exit(0)
