@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/montanaflynn/stats"
 )
 
 func main() {
@@ -29,33 +31,65 @@ func main() {
 		os.Exit(2)
 	}
 
-	/*addr := fmt.Sprintf("%s:%d", host, port)*/
-
 	ping(host, port, count, timeout)
 
-	/*	_, err = net.DialTimeout("tcp", addr, time.Second*time.Duration(timeout))
-		if err != nil {
-			fmt.Println(fmt.Sprintf("%s port %d closed.", host, port))
-			os.Exit(0)
-		}
-
-		fmt.Println(fmt.Sprintf("%s port %d open.", host, port))*/
 }
 
 func ping(host string, port int, count int, timeout int) {
+	successfulProbes := 0
+	i := 1
+	timeTotal := time.Duration(0)
+	var responseTimes []float64
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
-	for i := 1; count >= i; i++ {
+	for i = 1; count >= i; i++ {
 		timeStart := time.Now()
 		_, err := net.DialTimeout("tcp", addr, time.Second*time.Duration(timeout))
 		responseTime := time.Since(timeStart)
 		if err != nil {
 			fmt.Println(fmt.Sprintf("%s port %d closed.", host, port))
-			os.Exit(0)
+		} else {
+			fmt.Println(fmt.Sprintf("Connected to %s:%d, RTT=%.2fms", host, port, float32(responseTime)/1e6))
+			timeTotal += responseTime
+			successfulProbes++
 		}
 
-		fmt.Println(fmt.Sprintf("Connected to %s:%d, RTT=%.2fms", host, port, float32(responseTime)/1e6))
 		time.Sleep(1e9)
 	}
+
+	// Let's calculate and spill some results
+	// 1. Average response time
+	timeAverage := time.Duration(int64(timeTotal) / int64(successfulProbes))
+
+	// 2. Min and Max response times
+	var biggest float64
+
+	smallest := float64(1000000000)
+
+	for _, v := range responseTimes {
+
+		if v > biggest {
+			biggest = v
+		}
+
+		if v < smallest {
+			smallest = v
+		}
+
+	}
+
+	// 3. Median response time
+	median, _ := stats.Median(responseTimes)
+
+	// 4. Percentile
+	percentile90, _ := stats.Percentile(responseTimes, float64(90))
+	percentile75, _ := stats.Percentile(responseTimes, float64(75))
+	percentile50, _ := stats.Percentile(responseTimes, float64(50))
+	percentile25, _ := stats.Percentile(responseTimes, float64(25))
+
+	fmt.Println("\nProbes sent:", i-1, "\nSuccessful responses:", successfulProbes, "\n% of requests failed:", float64(100-(successfulProbes*100)/(i-1)), "\nMin response time:", time.Duration(smallest), "\nAverage response time:", timeAverage, "\nMedian response time:", time.Duration(median), "\nMax response time:", time.Duration(biggest))
+
+	fmt.Println("\n90% of requests were faster than:", time.Duration(percentile90), "\n75% of requests were faster than:", time.Duration(percentile75), "\n50% of requests were faster than:", time.Duration(percentile50), "\n25% of requests were faster than:", time.Duration(percentile25))
+
 }
