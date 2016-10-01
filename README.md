@@ -25,9 +25,23 @@ Golang > 1.3
 
 ### Example
 
-    D:\gotcping> gotcping -host github.com -port 80 -count 5 -timeout 1
-    Connected to github.com:80, RTT=4.04ms
-    Connected to github.com:80, RTT=3.95ms
-    Connected to github.com:80, RTT=6.01ms
-    Connected to github.com:80, RTT=4.56ms
-    Connected to github.com:80, RTT=3.04ms
+    D:\gotcping> .\gotcping.exe -host github.com -count 5 -port 443
+    Connected to github.com:443, RTT=93.91ms
+    Connected to github.com:443, RTT=93.31ms
+    Connected to github.com:443, RTT=98.64ms
+    Connected to github.com:443, RTT=100.04ms
+    Connected to github.com:443, RTT=89.22ms
+    
+
+    Probes sent: 5
+    Successful responses: 5
+    % of requests failed: 0
+    Min response time: 89.2242ms
+    Average response time: 95.02352ms
+    Median response time: 93.9077ms
+    Max response time: 100.0405ms
+
+    90% of requests were faster than: 100.0405ms
+    75% of requests were faster than: 98.6356ms
+    50% of requests were faster than: 93.9077ms
+    25% of requests were faster than: 89.2242ms

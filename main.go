@@ -53,6 +53,7 @@ func ping(host string, port int, count int, timeout int) {
 			fmt.Println(fmt.Sprintf("Connected to %s:%d, RTT=%.2fms", host, port, float32(responseTime)/1e6))
 			timeTotal += responseTime
 			successfulProbes++
+			responseTimes = append(responseTimes, float64(responseTime))
 		}
 
 		time.Sleep(1e9)
