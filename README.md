@@ -1,27 +1,33 @@
 # TCPing
 Yet another tcping tool - forked from https://github.com/hwsdien/gotcping
 
-Measure your TCP latency to any TCP endpoint.
+Measure your RTT / latency to any TCP endpoint.
 
 ## Requirements
 
-Golang > 1.3
+gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  library by [montanaflynn](https://github.com/montanaflynn) 
 
 ## Installing
 ### From source
 
     go get github.com/pjperez/gotcping
 
+## Binaries
+
+### Windows
+
+[gotcping 0.5](https://github.com/pjperez/gotcping/releases/tag/0.5)
+
 ## Usage
 
-    gotcping -host hostname [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds]
+    gotcping [-host hostname] [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds]
 
 ### Defaults
 
         -host defaults to bing.com
         -port default to 80
         -count defaults to 10
-        -timeout defaults to 5 
+        -timeout defaults to 1 
 
 ### Example
 
@@ -45,3 +51,4 @@ Golang > 1.3
     75% of requests were faster than: 98.6356ms
     50% of requests were faster than: 93.9077ms
     25% of requests were faster than: 89.2242ms
+
