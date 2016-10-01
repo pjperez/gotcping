@@ -15,7 +15,7 @@ func main() {
 	hostPtr := flag.String("host", "bing.com", "Host or IP address to test")
 	portPtr := flag.Int("port", 80, "Port number to query")
 	countPtr := flag.Int("count", 10, "Number of requests to send")
-	timeoutPtr := flag.Int("timeout", 5, "Timeout for each request, in seconds")
+	timeoutPtr := flag.Int("timeout", 1, "Timeout for each request, in seconds")
 
 	flag.Parse()
 
@@ -48,7 +48,7 @@ func ping(host string, port int, count int, timeout int) {
 		_, err := net.DialTimeout("tcp", addr, time.Second*time.Duration(timeout))
 		responseTime := time.Since(timeStart)
 		if err != nil {
-			fmt.Println(fmt.Sprintf("%s port %d closed.", host, port))
+			fmt.Println(fmt.Sprintf("Received timeout while connecting to %s on port %d.", host, port))
 		} else {
 			fmt.Println(fmt.Sprintf("Connected to %s:%d, RTT=%.2fms", host, port, float32(responseTime)/1e6))
 			timeTotal += responseTime
@@ -56,13 +56,18 @@ func ping(host string, port int, count int, timeout int) {
 			responseTimes = append(responseTimes, float64(responseTime))
 		}
 
-		time.Sleep(1e9)
+		time.Sleep(time.Second - responseTime)
 	}
 
 	// Let's calculate and spill some results
 	// 1. Average response time
-	timeAverage := time.Duration(int64(timeTotal) / int64(successfulProbes))
-
+	timeAverage := time.Duration(1)
+	if successfulProbes > 0 {
+		timeAverage = time.Duration(int64(timeTotal) / int64(successfulProbes))
+	} else {
+		fmt.Printf("\nAll the requests have failed. The host %s is not replying to connections on %d\n", host, port)
+		os.Exit(1)
+	}
 	// 2. Min and Max response times
 	var biggest float64
 
