@@ -20,11 +20,10 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 
 ## Usage
 
-    gotcping [-host hostname] [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds]
+    gotcping -host hostname [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds]
 
 ### Defaults
 
-        -host defaults to bing.com
         -port default to 80
         -count defaults to 10
         -timeout defaults to 1 
