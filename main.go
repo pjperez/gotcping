@@ -12,7 +12,7 @@ import (
 
 func main() {
 
-	hostPtr := flag.String("host", "bing.com", "Host or IP address to test")
+	hostPtr := flag.String("host", "", "Host or IP address to test")
 	portPtr := flag.Int("port", 80, "Port number to query")
 	countPtr := flag.Int("count", 10, "Number of requests to send")
 	timeoutPtr := flag.Int("timeout", 1, "Timeout for each request, in seconds")
@@ -25,6 +25,10 @@ func main() {
 	count := *countPtr
 	timeout := *timeoutPtr
 
+	if host == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
 	_, err := net.LookupIP(host)
 	if err != nil {
 		fmt.Println("error: unknown host")
