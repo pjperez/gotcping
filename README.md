@@ -14,9 +14,9 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 
 ## Binaries
 
-### Windows
+### Windows and Linux
 
-[gotcping 0.5](https://github.com/pjperez/gotcping/releases/tag/0.5)
+[gotcping 0.5.1](https://github.com/pjperez/gotcping/releases/tag/0.5.1)
 
 ## Usage
 
