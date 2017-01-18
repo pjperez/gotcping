@@ -16,11 +16,16 @@ func main() {
 	portPtr := flag.Int("port", 80, "Port number to query")
 	countPtr := flag.Int("count", 10, "Number of requests to send")
 	timeoutPtr := flag.Int("timeout", 1, "Timeout for each request, in seconds")
+	var host string
 
 	flag.Parse()
 
-	//args := flag.Args()
-	host := *hostPtr
+	if len(os.Args) == 2 && os.Args[1][:1] != "-" {
+		host = os.Args[1]
+	} else {
+		host = *hostPtr
+	}
+
 	port := *portPtr
 	count := *countPtr
 	timeout := *timeoutPtr
@@ -29,9 +34,11 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
 	_, err := net.LookupIP(host)
+
 	if err != nil {
-		fmt.Println("error: unknown host")
+		fmt.Printf("error: unknown host %s", host)
 		os.Exit(2)
 	}
 
@@ -54,7 +61,7 @@ func ping(host string, port int, count int, timeout int) {
 		if err != nil {
 			fmt.Println(fmt.Sprintf("Received timeout while connecting to %s on port %d.", host, port))
 		} else {
-			fmt.Println(fmt.Sprintf("Connected to %s:%d, RTT=%.2fms", host, port, float32(responseTime)/1e6))
+			fmt.Println(fmt.Sprintf("Probe %v: Connected to %s:%d, RTT=%.2fms", i, host, port, float32(responseTime)/1e6))
 			timeTotal += responseTime
 			successfulProbes++
 			responseTimes = append(responseTimes, float64(responseTime))
