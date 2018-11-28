@@ -20,7 +20,7 @@ func main() {
 
 	flag.Parse()
 
-	if len(os.Args) == 2 && os.Args[1][:1] != "-" {
+	if len(os.Args) > 1 && os.Args[1][:1] != "-" {
 		host = os.Args[1]
 	} else {
 		host = *hostPtr
@@ -38,7 +38,7 @@ func main() {
 	_, err := net.LookupIP(host)
 
 	if err != nil {
-		fmt.Printf("error: unknown host %s", host)
+		fmt.Printf("error: can't resolve %s\n", host)
 		os.Exit(2)
 	}
 
@@ -70,7 +70,13 @@ func ping(host string, port int, count int, timeout int) {
 		time.Sleep(time.Second - responseTime)
 	}
 
-	// Let's calculate and spill some results
+	// Print results
+	output(successfulProbes, timeTotal, host, port, responseTimes, i)
+
+}
+
+func output(successfulProbes int, timeTotal time.Duration, host string, port int, responseTimes []float64, i int) {
+    // Let's calculate and spill some results
 	// 1. Average response time
 	timeAverage := time.Duration(1)
 	if successfulProbes > 0 {
@@ -105,8 +111,16 @@ func ping(host string, port int, count int, timeout int) {
 	percentile50, _ := stats.Percentile(responseTimes, float64(50))
 	percentile25, _ := stats.Percentile(responseTimes, float64(25))
 
-	fmt.Println("\nProbes sent:", i-1, "\nSuccessful responses:", successfulProbes, "\n% of requests failed:", float64(100-(successfulProbes*100)/(i-1)), "\nMin response time:", time.Duration(smallest), "\nAverage response time:", timeAverage, "\nMedian response time:", time.Duration(median), "\nMax response time:", time.Duration(biggest))
+	fmt.Println("\nProbes sent:", i-1, "\nSuccessful responses:", successfulProbes,
+	 "\n% of requests failed:", float64(100-(successfulProbes*100)/(i-1)),
+	  "\nMin response time:", time.Duration(smallest),
+	   "\nAverage response time:", timeAverage,
+		"\nMedian response time:", time.Duration(median),
+		 "\nMax response time:", time.Duration(biggest))
 
-	fmt.Println("\n90% of requests were faster than:", time.Duration(percentile90), "\n75% of requests were faster than:", time.Duration(percentile75), "\n50% of requests were faster than:", time.Duration(percentile50), "\n25% of requests were faster than:", time.Duration(percentile25))
+	fmt.Println("\n90% of requests were faster than:", time.Duration(percentile90),
+	 "\n75% of requests were faster than:", time.Duration(percentile75),
+	  "\n50% of requests were faster than:", time.Duration(percentile50),
+	   "\n25% of requests were faster than:", time.Duration(percentile25))
 
 }
