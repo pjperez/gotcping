@@ -20,7 +20,7 @@ func main() {
 
 	flag.Parse()
 
-	if len(os.Args) > 1 && os.Args[1][:1] != "-" {
+	if len(os.Args) == 2 && os.Args[1][:1] != "-" {
 		host = os.Args[1]
 	} else {
 		host = *hostPtr
