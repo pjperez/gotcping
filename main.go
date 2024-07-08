@@ -13,7 +13,7 @@ func main() {
 
 	hostPtr := flag.String("host", "", "Host or IP address to test")
 	portPtr := flag.Int("port", 80, "Port number to query")
-	countPtr := flag.Int("count", 10, "Number of requests to send")
+	countPtr := flag.Int("count", 10, "Number of requests to send [0 means infinite]")
 	timeoutPtr := flag.Int("timeout", 1, "Timeout for each request, in seconds")
 	var host string
 
@@ -53,7 +53,7 @@ func ping(host string, port int, count int, timeout int) {
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
-	for i = 1; count >= i; i++ {
+	for i = 1; (count >= i || count < 1); i++ {
 		timeStart := time.Now()
 		_, err := net.DialTimeout("tcp", addr, time.Second*time.Duration(timeout))
 		responseTime := time.Since(timeStart)
@@ -66,7 +66,11 @@ func ping(host string, port int, count int, timeout int) {
 			responseTimes = append(responseTimes, float64(responseTime))
 		}
 
-		time.Sleep(time.Second - responseTime)
+		// Don't sleep after the last needed ping, so results can be displayed 1 second faster
+		// (quick mathematics are cheap, 1 second is long)
+		if ((count-i) > 1) || (count <= 0) {
+			time.Sleep(time.Second - responseTime)
+		}
 	}
 
 	// Print results
