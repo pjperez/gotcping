@@ -29,7 +29,7 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 ### Defaults
 
     -port default to 80
-    -count defaults to 10 probes
+    -count defaults to 10 probes [0 means infinite]
     -timeout defaults to 1 second
 
 ### Example
