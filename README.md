@@ -10,7 +10,11 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 ## Installing
 ### From source
 
-    go get github.com/pjperez/gotcping
+    go install github.com/pjperez/gotcping@latest
+
+### Running from source without installing
+
+    go run github.com/pjperez/gotcping@latest <args>
 
 ## Binaries
 
@@ -20,7 +24,7 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 
 ## Usage
 
-    gotcping -host host [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds]
+    gotcping -host host [-port port_number] [-count number_of_repetitions] [-timeout timeout_in_seconds] [-deadline max_seconds]
 
 ### Alternate (only host is mandatory and can be specified either as a flag or as an argument)
 
@@ -29,8 +33,9 @@ gotcping uses the awesome [stats](https://github.com/montanaflynn/stats)  librar
 ### Defaults
 
     -port default to 80
-    -count defaults to 10 probes [0 means infinite]
+    -count defaults to 10 probes [0 or negative means infinite]
     -timeout defaults to 1 second
+    -deadline defaults to 0 (no deadline; in infinite mode use Ctrl+C to stop and still print results)
 
 ### Example
 

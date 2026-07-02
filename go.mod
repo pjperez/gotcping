@@ -1,4 +1,4 @@
-module gotcping
+module github.com/pjperez/gotcping
 
 go 1.25.10
 
