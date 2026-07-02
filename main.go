@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"time"
+
 	"github.com/montanaflynn/stats"
 )
 
@@ -53,14 +55,31 @@ func ping(host string, port int, count int, timeout int) {
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
+	// In infinite mode (count < 1), allow Ctrl+C to stop and still print results.
+	stop := make(chan os.Signal, 1)
+	if count < 1 {
+		signal.Notify(stop, os.Interrupt)
+	}
+	defer signal.Stop(stop)
+
 	for i = 1; (count >= i || count < 1); i++ {
+		if count < 1 {
+			select {
+			case <-stop:
+				// i is the probe that was about to start; report i-1 sent.
+				output(successfulProbes, timeTotal, host, port, responseTimes, i)
+				os.Exit(0)
+			default:
+			}
+		}
+
 		timeStart := time.Now()
 		_, err := net.DialTimeout("tcp", addr, time.Second*time.Duration(timeout))
 		responseTime := time.Since(timeStart)
 		if err != nil {
-			fmt.Println(fmt.Sprintf("Received timeout while connecting to %s on port %d.", host, port))
+			fmt.Printf("Received timeout while connecting to %s on port %d.\n", host, port)
 		} else {
-			fmt.Println(fmt.Sprintf("Probe %v: Connected to %s:%d, RTT=%.2fms", i, host, port, float32(responseTime)/1e6))
+			fmt.Printf("Probe %v: Connected to %s:%d, RTT=%.2fms\n", i, host, port, float32(responseTime)/1e6)
 			timeTotal += responseTime
 			successfulProbes++
 			responseTimes = append(responseTimes, float64(responseTime))
@@ -68,8 +87,19 @@ func ping(host string, port int, count int, timeout int) {
 
 		// Don't sleep after the last needed ping, so results can be displayed 1 second faster
 		// (quick mathematics are cheap, 1 second is long)
-		if ((count-i) > 1) || (count <= 0) {
-			time.Sleep(time.Second - responseTime)
+		if (count-i) > 0 || count <= 0 {
+			if count < 1 {
+				// Interruptible sleep so Ctrl+C is responsive.
+				select {
+				case <-stop:
+					// Last completed probe is i; report i probes sent.
+					output(successfulProbes, timeTotal, host, port, responseTimes, i+1)
+					os.Exit(0)
+				case <-time.After(time.Second - responseTime):
+				}
+			} else {
+				time.Sleep(time.Second - responseTime)
+			}
 		}
 	}
 
@@ -114,9 +144,12 @@ func output(successfulProbes int, timeTotal time.Duration, host string, port int
 	percentile50, _ := stats.Percentile(responseTimes, float64(50))
 	percentile25, _ := stats.Percentile(responseTimes, float64(25))
 
-	fmt.Println("\nProbes sent:", i-1, "\nSuccessful responses:", successfulProbes,
-	 "\n% of requests failed:", float64(100-(successfulProbes*100)/(i-1)),
-	  "\nMin response time:", time.Duration(smallest),
+	probesSent := i - 1
+	percentFailed := 100 - (float64(successfulProbes)*100)/float64(probesSent)
+
+	fmt.Println("\nProbes sent:", probesSent, "\nSuccessful responses:", successfulProbes,
+		"\n% of requests failed:", percentFailed,
+		"\nMin response time:", time.Duration(smallest),
 	   "\nAverage response time:", timeAverage,
 		"\nMedian response time:", time.Duration(median),
 		 "\nMax response time:", time.Duration(biggest))
