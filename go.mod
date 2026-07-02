@@ -1,5 +1,5 @@
 module gotcping
 
-go 1.25.5
+go 1.25.10
 
-require github.com/montanaflynn/stats v0.9.0 // indirect
+require github.com/montanaflynn/stats v0.9.0
