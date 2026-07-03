@@ -374,15 +374,15 @@ func computeStats(attempts, successful int, samples []float64, host string, port
 	}
 
 	sum := 0.0
-	min := ms[0]
-	max := ms[0]
+	minMs := ms[0]
+	maxMs := ms[0]
 	for _, v := range ms {
 		sum += v
-		if v < min {
-			min = v
+		if v < minMs {
+			minMs = v
 		}
-		if v > max {
-			max = v
+		if v > maxMs {
+			maxMs = v
 		}
 	}
 	avg := sum / float64(len(ms))
@@ -421,10 +421,10 @@ func computeStats(attempts, successful int, samples []float64, host string, port
 		Successful:    successful,
 		Failed:        failed,
 		PercentFailed: percentFailed,
-		MinMs:         min,
+		MinMs:         minMs,
 		AvgMs:         avg,
 		MedianMs:      median,
-		MaxMs:         max,
+		MaxMs:         maxMs,
 		StdDevMs:      stddev,
 		JitterMs:      jitter,
 		P25Ms:         p25,
