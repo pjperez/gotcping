@@ -45,7 +45,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          install-mode: gobuild
+          install-mode: goinstall
 
   vet:
     runs-on: ubuntu-latest
