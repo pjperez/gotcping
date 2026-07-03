@@ -37,10 +37,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # install-mode=gobuild installs via `go install`, so golangci-lint is
+      # built with the same Go toolchain as the module (go 1.25). The action's
+      # default prebuilt binary is built with an older Go and refuses to lint
+      # newer modules ("Go version ... is lower than the targeted Go version").
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          install-mode: gobuild
 
   vet:
     runs-on: ubuntu-latest
