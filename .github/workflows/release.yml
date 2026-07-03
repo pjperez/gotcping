@@ -1,0 +1,85 @@
+name: release
+
+# Builds cross-platform binaries and publishes a GitHub Release whenever a
+# version tag is pushed. Tags follow the project convention, e.g. `0.6.0`
+# (bare) or `v0.6.0` (v-prefixed); the leading `v` is stripped for display.
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p out
+          go build -trimpath \
+            -ldflags="-s -w -X main.Version=${v}" \
+            -o "out/gotcping_${GOOS}_${GOARCH}${{ matrix.ext }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotcping_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize version
+        id: ver
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.ver.outputs.version }}
+          body_path: CHANGELOG.md
+          fail_on_unmatched_files: true
+          files: dist/*

@@ -1,0 +1,28 @@
+# golangci-lint configuration for gotcping.
+# CI runs `golangci-lint run`; locally run the same.
+run:
+  timeout: 3m
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # go vet
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # correctness
+    - unused        # unused code
+    - misspell      # spelling in comments/strings
+    - revive        # style/formatting checks
+
+linters-settings:
+  errcheck:
+    # Dial/Close errors in the hot path are intentionally surfaced via the
+    # printed failure line; the rest of the codebase must check errors.
+    exclude-functions: []
+
+issues:
+  exclude-rules:
+    # stats.* return errors only for empty/NaN input, which computeStats guards.
+    - path: main\.go
+      linters: [errcheck]
+      text: "stats\\.(Median|Percentile|StandardDeviation)"
