@@ -1,19 +1,14 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-
-	"github.com/montanaflynn/stats"
 )
 
 // Exit codes (kept stable for scripts/CI wrapping this tool).
@@ -22,12 +17,13 @@ const (
 	exitUsage         = 1
 	exitResolveFailed = 2
 	exitAllFailed     = 3
+	exitLossExceeded  = 4
 )
 
 // Version is the current version of gotcping. It defaults to "dev" for
 // source builds and is overridden at release time via ldflags, e.g.
 //
-//	go build -ldflags="-X main.Version=0.6.0" .
+//	go build -ldflags="-X main.Version=0.7.0" .
 var Version = "dev"
 
 // maxSamples caps how many RTT samples are retained for statistics. In
@@ -38,11 +34,24 @@ func main() {
 	hostPtr := flag.String("host", "", "Host or IP address to test")
 	portPtr := flag.Int("port", 80, "Port number to query (1-65535)")
 	countPtr := flag.Int("count", 10, "Number of requests to send [0 or negative means infinite]")
-	timeoutPtr := flag.Int("timeout", 1, "Timeout for each request, in seconds (>=1)")
+	timeoutPtr := flag.Float64("timeout", 1.0, "Per-probe dial timeout, in seconds (>= 0.001)")
 	deadlinePtr := flag.Int("deadline", 0, "Stop after this many seconds regardless of count [0 means no deadline]")
 	intervalPtr := flag.Float64("i", 1.0, "Seconds between probes (>= 0.001)")
+	concurrencyPtr := flag.Int("P", 1, "Number of concurrent in-flight probes (>= 1)")
 	quietPtr := flag.Bool("q", false, "Quiet: suppress per-probe lines, print only the summary")
-	jsonPtr := flag.Bool("json", false, "Emit results as a single JSON object on stdout (for automation)")
+	jsonPtr := flag.Bool("json", false, "Emit results as a single JSON object on stdout")
+	jsonlPtr := flag.Bool("jsonl", false, "Emit one JSON object per probe plus a summary line")
+	csvPtr := flag.Bool("csv", false, "Emit probe and summary rows as CSV on stdout")
+	histPtr := flag.Bool("hist", false, "Print an ASCII RTT histogram with the text summary")
+	tlsPtr := flag.Bool("tls", false, "Also measure the TLS handshake (SNI defaults to the host)")
+	sniPtr := flag.String("sni", "", "SNI/ServerName for the TLS handshake (implies TLS probing)")
+	insecurePtr := flag.Bool("insecure", false, "Skip TLS certificate verification")
+	kernelRttPtr := flag.Bool("rtt", false, "Report the kernel-smoothed RTT via TCP_INFO (Linux)")
+	sourcePtr := flag.String("source", "", "Bind probes to this source IP or interface name")
+	sourcePortPtr := flag.String("source-port", "", "Bind source ports in a range, e.g. 2000-3000")
+	tsPtr := flag.Bool("t", false, "Prefix per-probe lines with a millisecond timestamp")
+	exitLossPtr := flag.Float64("exit-loss", -1, "Exit 4 when the %% of failed probes exceeds this (0-100; -1 disables)")
+	filePtr := flag.String("file", "", "Read targets (host[:port] per line, '#' comments) and probe them all")
 	ipv4OnlyPtr := flag.Bool("4", false, "Force IPv4 when resolving the host")
 	ipv6OnlyPtr := flag.Bool("6", false, "Force IPv6 when resolving the host")
 	versionPtr := flag.Bool("version", false, "Print version and exit")
@@ -66,22 +75,10 @@ func main() {
 
 	port := *portPtr
 	count := *countPtr
-	timeout := *timeoutPtr
 	deadline := *deadlinePtr
 
-	if host == "" {
-		flag.Usage()
-		os.Exit(exitUsage)
-	}
-	if err := validatePort(port); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(exitUsage)
-	}
-	if err := validateTimeout(timeout); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(exitUsage)
-	}
-	if err := validateDeadline(deadline); err != nil {
+	timeout, err := validateTimeout(*timeoutPtr)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(exitUsage)
 	}
@@ -95,26 +92,118 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(exitUsage)
 	}
-
-	// Resolve once and dial the resulting IP, so the host we validate is the
-	// host we actually connect to (avoids DNS-rebinding TOCTOU between a
-	// validation lookup and the dial, and re-resolution per probe).
-	resolvedIP, err := resolveHost(host, family)
+	if err := validatePort(port); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(exitUsage)
+	}
+	if err := validateDeadline(deadline); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(exitUsage)
+	}
+	if *concurrencyPtr < 1 {
+		fmt.Fprintf(os.Stderr, "error: concurrency (-P) must be >= 1 (got %d)\n", *concurrencyPtr)
+		os.Exit(exitUsage)
+	}
+	if *exitLossPtr < -1 || *exitLossPtr > 100 {
+		fmt.Fprintf(os.Stderr, "error: -exit-loss must be between 0 and 100 (got %g)\n", *exitLossPtr)
+		os.Exit(exitUsage)
+	}
+	sourceStart, sourceEnd, err := parsePortRange(*sourcePortPtr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(exitResolveFailed)
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(exitUsage)
+	}
+	if *sourcePtr != "" {
+		if _, err := parseSource(*sourcePtr); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(exitUsage)
+		}
 	}
 
 	opts := options{
-		count:    count,
-		timeout:  timeout,
-		deadline: deadline,
-		interval: interval,
-		quiet:    *quietPtr,
-		json:     *jsonPtr,
+		count:           count,
+		timeout:         timeout,
+		deadline:        deadline,
+		interval:        interval,
+		concurrency:     *concurrencyPtr,
+		source:          *sourcePtr,
+		sourcePortStart: sourceStart,
+		sourcePortEnd:   sourceEnd,
+		sni:             *sniPtr,
+		tls:             *tlsPtr,
+		insecureTLS:     *insecurePtr,
+		kernelRTT:       *kernelRttPtr,
+		exitLoss:        *exitLossPtr,
+		quiet:           *quietPtr,
+		json:            *jsonPtr,
+		jsonl:           *jsonlPtr,
+		csv:             *csvPtr,
+		histogram:       *histPtr,
+		timestamps:      *tsPtr,
+		csvHeader:       true,
 	}
 
-	ping(sanitize(host), resolvedIP, port, opts)
+	if *filePtr != "" {
+		os.Exit(runFileMode(*filePtr, port, family, opts))
+	}
+
+	if host == "" {
+		flag.Usage()
+		os.Exit(exitUsage)
+	}
+
+	os.Exit(pingTarget(host, port, family, opts))
+}
+
+// pingTarget resolves host (once) and runs a ping for it, returning the exit
+// code. With -tls and no explicit -sni, the host is used as the SNI name.
+func pingTarget(host string, port int, family string, opts options) int {
+	resolvedIP, err := resolveHost(host, family)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return exitResolveFailed
+	}
+	if opts.tls && opts.sni == "" {
+		opts.sni = host
+	}
+	return ping(sanitize(host), resolvedIP, port, opts)
+}
+
+// runFileMode probes every target in path (see readTargets) and returns the
+// most severe exit code across all targets.
+func runFileMode(path string, defaultPort int, family string, opts options) int {
+	targets, err := readTargets(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return exitUsage
+	}
+	if len(targets) == 0 {
+		fmt.Fprintf(os.Stderr, "error: no targets found in %s\n", path)
+		return exitUsage
+	}
+
+	// Emit the CSV probe header once; ping() must not repeat it per target.
+	if opts.csv {
+		cw := csv.NewWriter(os.Stdout)
+		_ = cw.Write(csvProbeHeader)
+		cw.Flush()
+		opts.csvHeader = false
+	}
+
+	code := exitOK
+	for _, t := range targets {
+		port := t.port
+		if port == 0 {
+			port = defaultPort
+		}
+		if !opts.json && !opts.jsonl && !opts.csv {
+			fmt.Printf("== %s:%d ==\n", sanitize(t.host), port)
+		}
+		if c := pingTarget(t.host, port, family, opts); c > code {
+			code = c
+		}
+	}
+	return code
 }
 
 // validatePort returns an error if p is outside the valid TCP port range.
@@ -125,14 +214,15 @@ func validatePort(p int) error {
 	return nil
 }
 
-// validateTimeout enforces a positive dial timeout. A non-positive timeout
-// disables the dial timeout on most platforms, defeating the tool's own DoS
-// protection and hanging the process.
-func validateTimeout(t int) error {
-	if t < 1 {
-		return fmt.Errorf("timeout must be at least 1 second (got %d)", t)
+// validateTimeout enforces a positive dial timeout (sub-second allowed, down
+// to 1ms) and returns it as a Duration. A non-positive timeout disables the
+// dial timeout on most platforms, defeating the tool's own DoS protection and
+// hanging the process.
+func validateTimeout(seconds float64) (time.Duration, error) {
+	if seconds < 0.001 {
+		return 0, fmt.Errorf("timeout must be >= 0.001 seconds (got %g)", seconds)
 	}
-	return nil
+	return time.Duration(seconds * float64(time.Second)), nil
 }
 
 // validateDeadline enforces a non-negative deadline.
@@ -154,12 +244,80 @@ func validateInterval(seconds float64) (time.Duration, error) {
 
 // options configures a ping run.
 type options struct {
-	count    int
-	timeout  int
-	deadline int
-	interval time.Duration
-	quiet    bool
-	json     bool
+	count           int
+	timeout         time.Duration
+	deadline        int
+	interval        time.Duration
+	concurrency     int
+	source          string
+	sourcePortStart int
+	sourcePortEnd   int
+	sni             string
+	tls             bool
+	insecureTLS     bool
+	kernelRTT       bool
+	exitLoss        float64
+	quiet           bool
+	json            bool
+	jsonl           bool
+	csv             bool
+	histogram       bool
+	timestamps      bool
+	csvHeader       bool // internal: emit the CSV probe header (once in -file mode)
+}
+
+// parseSource resolves a source-bind value: either a literal IP address or an
+// interface name (its first IPv4 address is used).
+func parseSource(s string) (net.IP, error) {
+	if ip := net.ParseIP(s); ip != nil {
+		return ip, nil
+	}
+	iface, err := net.InterfaceByName(s)
+	if err != nil {
+		return nil, fmt.Errorf("can't parse %q as an IP address or interface name", s)
+	}
+	addrs, err := iface.Addrs()
+	if err != nil || len(addrs) == 0 {
+		return nil, fmt.Errorf("interface %q has no usable addresses", s)
+	}
+	for _, a := range addrs {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip != nil && ip.To4() != nil {
+			return ip, nil
+		}
+	}
+	return nil, fmt.Errorf("interface %q has no IPv4 address", s)
+}
+
+// parsePortRange parses "start" or "start-end" (inclusive) into a port range.
+// An empty string yields (0,0) meaning "use ephemeral ports".
+func parsePortRange(s string) (int, int, error) {
+	if s == "" {
+		return 0, 0, nil
+	}
+	start, end, err := 0, 0, error(nil)
+	if lo, hi, ok := strings.Cut(s, "-"); ok {
+		start, err = strconv.Atoi(lo)
+		if err == nil {
+			end, err = strconv.Atoi(hi)
+		}
+	} else {
+		start, err = strconv.Atoi(s)
+		end = start
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid source-port range %q", s)
+	}
+	if start < 1 || end > 65535 || start > end {
+		return 0, 0, fmt.Errorf("source-port range must satisfy 1 <= start <= end <= 65535 (got %d-%d)", start, end)
+	}
+	return start, end, nil
 }
 
 // resolveFamily maps the -4/-6 flags to a net IP-network family. "" (any)
@@ -213,257 +371,4 @@ func sanitize(s string) string {
 		}
 		return r
 	}, s)
-}
-
-func ping(displayHost, resolvedIP string, port int, opts options) {
-	attempts := 0
-	successfulProbes := 0
-	ring := newSampleRing(maxSamples)
-
-	// net.JoinHostPort correctly brackets IPv6 literals (also clears the
-	// `go vet` "address format does not work with IPv6" warning).
-	addr := net.JoinHostPort(resolvedIP, strconv.Itoa(port))
-
-	// Always allow Ctrl+C / SIGTERM (or a deadline) to stop and still print
-	// results, for both finite and infinite runs.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stop)
-
-	var deadlineCh <-chan time.Time
-	if opts.deadline > 0 {
-		deadlineCh = time.After(time.Duration(opts.deadline) * time.Second)
-	}
-
-	// Per-probe diagnostics (success lines, failure lines) are suppressed in
-	// quiet/json mode and on stderr otherwise, so the summary/stdout stays a
-	// clean, parseable stream.
-	showProbe := !opts.quiet && !opts.json
-
-loop:
-	for {
-		if opts.count >= 1 && attempts >= opts.count {
-			break
-		}
-		select {
-		case <-stop:
-			break loop
-		case <-deadlineCh:
-			break loop
-		default:
-		}
-
-		attempts++
-		timeStart := time.Now()
-		_, err := net.DialTimeout("tcp", addr, time.Second*time.Duration(opts.timeout))
-		responseTime := time.Since(timeStart)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to connect to %s on port %d: %v\n", displayHost, port, err)
-		} else {
-			if showProbe {
-				fmt.Printf("Probe %v: Connected to %s:%d, RTT=%.2fms\n", attempts, displayHost, port, float64(responseTime.Nanoseconds())/1e6)
-			}
-			successfulProbes++
-			ring.add(float64(responseTime))
-		}
-
-		// Don't sleep after the last probe of a finite run, so results are
-		// displayed ~one interval sooner.
-		if opts.count < 1 || attempts < opts.count {
-			sleep := opts.interval - responseTime
-			if sleep < 0 {
-				sleep = 0
-			}
-			select {
-			case <-stop:
-				break loop
-			case <-deadlineCh:
-				break loop
-			case <-time.After(sleep):
-			}
-		}
-	}
-
-	if err := output(attempts, successfulProbes, ring.values(), displayHost, port, opts); err != nil {
-		// All probes failed.
-		if opts.json {
-			fmt.Fprintf(os.Stderr, "{\"error\":%q,\"host\":%q,\"port\":%d}\n", err.Error(), displayHost, port)
-		} else {
-			fmt.Fprintf(os.Stderr, "\nAll the requests have failed. The host %s is not replying to connections on %d\n", displayHost, port)
-		}
-		os.Exit(exitAllFailed)
-	}
-}
-
-// sampleRing is a fixed-capacity ring buffer of float64 samples. Once full,
-// new samples overwrite the oldest. values() returns the current contents in
-// insertion order.
-type sampleRing struct {
-	buf  []float64
-	cap  int
-	head int
-	full bool
-}
-
-func newSampleRing(c int) *sampleRing {
-	if c < 1 {
-		c = 1
-	}
-	return &sampleRing{cap: c}
-}
-
-func (r *sampleRing) add(v float64) {
-	if !r.full {
-		if len(r.buf) < r.cap {
-			r.buf = append(r.buf, v)
-			return
-		}
-		r.full = true
-	}
-	r.buf[r.head] = v
-	r.head++
-	if r.head == r.cap {
-		r.head = 0
-	}
-}
-
-func (r *sampleRing) values() []float64 {
-	if !r.full {
-		return r.buf
-	}
-	out := make([]float64, r.cap)
-	n := copy(out, r.buf[r.head:])
-	copy(out[n:], r.buf[:r.head])
-	return out
-}
-
-// statistics is the computed summary of a run. All latency fields are in
-// milliseconds. It is serialized directly for the -json output mode.
-type statistics struct {
-	Host          string  `json:"host"`
-	Port          int     `json:"port"`
-	ProbesSent    int     `json:"probes_sent"`
-	Successful    int     `json:"successful"`
-	Failed        int     `json:"failed"`
-	PercentFailed float64 `json:"percent_failed"`
-	MinMs         float64 `json:"min_ms"`
-	AvgMs         float64 `json:"avg_ms"`
-	MedianMs      float64 `json:"median_ms"`
-	MaxMs         float64 `json:"max_ms"`
-	StdDevMs      float64 `json:"stddev_ms"`
-	JitterMs      float64 `json:"jitter_ms"`
-	P25Ms         float64 `json:"p25_ms"`
-	P50Ms         float64 `json:"p50_ms"`
-	P75Ms         float64 `json:"p75_ms"`
-	P90Ms         float64 `json:"p90_ms"`
-}
-
-// computeStats summarizes a run. samples are RTTs in nanoseconds as float64
-// (one entry per successful probe). It returns an error if there were no
-// successful probes.
-func computeStats(attempts, successful int, samples []float64, host string, port int) (*statistics, error) {
-	if successful == 0 || len(samples) == 0 {
-		return nil, errors.New("no successful probes")
-	}
-
-	toMs := func(ns float64) float64 { return ns / 1e6 }
-
-	ms := make([]float64, len(samples))
-	for i, v := range samples {
-		ms[i] = toMs(v)
-	}
-
-	sum := 0.0
-	minMs := ms[0]
-	maxMs := ms[0]
-	for _, v := range ms {
-		sum += v
-		if v < minMs {
-			minMs = v
-		}
-		if v > maxMs {
-			maxMs = v
-		}
-	}
-	avg := sum / float64(len(ms))
-
-	median, _ := stats.Median(ms)
-	stddev, _ := stats.StandardDeviation(ms)
-	p25, _ := stats.Percentile(ms, 25)
-	p75, _ := stats.Percentile(ms, 75)
-	p90, _ := stats.Percentile(ms, 90)
-
-	// Jitter: mean absolute difference between consecutive samples, in time
-	// order (a standard packet-delay-variation measure, as in RTP/iperf).
-	jitter := 0.0
-	if len(ms) > 1 {
-		var acc float64
-		for i := 1; i < len(ms); i++ {
-			d := ms[i] - ms[i-1]
-			if d < 0 {
-				d = -d
-			}
-			acc += d
-		}
-		jitter = acc / float64(len(ms)-1)
-	}
-
-	failed := attempts - successful
-	percentFailed := 0.0
-	if attempts > 0 {
-		percentFailed = (float64(failed) * 100) / float64(attempts)
-	}
-
-	return &statistics{
-		Host:          host,
-		Port:          port,
-		ProbesSent:    attempts,
-		Successful:    successful,
-		Failed:        failed,
-		PercentFailed: percentFailed,
-		MinMs:         minMs,
-		AvgMs:         avg,
-		MedianMs:      median,
-		MaxMs:         maxMs,
-		StdDevMs:      stddev,
-		JitterMs:      jitter,
-		P25Ms:         p25,
-		P50Ms:         median,
-		P75Ms:         p75,
-		P90Ms:         p90,
-	}, nil
-}
-
-// output computes stats and renders them (text or JSON) to stdout. It returns
-// an error iff every probe failed, so the caller can emit a diagnostic and
-// exit non-zero.
-func output(attempts, successful int, samples []float64, host string, port int, opts options) error {
-	s, err := computeStats(attempts, successful, samples, host, port)
-	if err != nil {
-		return err
-	}
-	if opts.json {
-		b, err := json.MarshalIndent(s, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(b))
-		return nil
-	}
-
-	fmt.Println("\nProbes sent:", s.ProbesSent,
-		"\nSuccessful responses:", s.Successful,
-		"\n% of requests failed:", s.PercentFailed,
-		"\nMin response time:", time.Duration(s.MinMs*1e6),
-		"\nAverage response time:", time.Duration(s.AvgMs*1e6),
-		"\nMedian response time:", time.Duration(s.MedianMs*1e6),
-		"\nMax response time:", time.Duration(s.MaxMs*1e6),
-		"\nStd deviation:", time.Duration(s.StdDevMs*1e6),
-		"\nJitter (mean abs delta):", time.Duration(s.JitterMs*1e6))
-
-	fmt.Println("\n90% of requests were faster than:", time.Duration(s.P90Ms*1e6),
-		"\n75% of requests were faster than:", time.Duration(s.P75Ms*1e6),
-		"\n50% of requests were faster than:", time.Duration(s.P50Ms*1e6),
-		"\n25% of requests were faster than:", time.Duration(s.P25Ms*1e6))
-	return nil
 }
