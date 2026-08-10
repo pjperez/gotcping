@@ -4,6 +4,67 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-08-09
+
+### Added — probing engine
+- **Concurrent probing** (`-P N`): probes run through a worker pool with up to
+  N concurrent dials while preserving the `-i` pacing between launches. Long
+  runs finish N times faster.
+- **Sub-second timeouts**: `-timeout` now accepts fractions of a second
+  (>= 0.001), enabling millisecond-level connect RTT measurement.
+- **TLS handshake timing** (`-tls`): after the TCP connect, gotcping performs a
+  real TLS handshake and reports the handshake duration per probe. `-sni`
+  overrides the SNI/ServerName (defaults to the target host) and `-insecure`
+  skips certificate verification for self-signed endpoints.
+- **Kernel RTT** (`-rtt`): reads `TCP_INFO` via `getsockopt` on Linux
+  (`golang.org/x/sys/unix`) and reports the average kernel-measured RTT — a
+  lower-bound estimate of path RTT that excludes userspace and queueing delay.
+  Silently disabled on other platforms.
+- **Source binding** (`-source` / `-source-port`): bind the local endpoint by
+  IP or interface name; `-source-port` accepts a fixed port or a `start-end`
+  range (a random port per dial avoids collisions under concurrency).
+- **Exit-loss threshold** (`-exit-loss percent`): exits with code `4` when the
+  % of failed probes exceeds the threshold — for scripts, cron, and health
+  checks.
+
+### Added — statistics & reporting
+- **p95 / p99 percentiles** added to every summary (JSON, JSONL, CSV, text).
+- **ASCII RTT histogram** (`-hist`): 20 equal-width bins rendered after the
+  summary.
+- **JSONL mode** (`-jsonl`): one JSON object per line — a `probe` event per
+  probe (with timestamp and TLS/error fields) and a `summary` event.
+- **CSV mode** (`-csv`): one row per probe plus a summary row; the separator is
+  auto-detected as comma or semicolon for locale-friendly spreadsheets.
+- **Timestamps** (`-t`): per-probe lines include a UTC timestamp.
+- **Multi-target file mode** (`-file targets.txt`): probes `host[:port]` per
+  line (`#` comments and bracketed IPv6 supported), one summary block per
+  target, and an exit code that is the most severe across all targets.
+
+### Added — governance & CI
+- New dependency `golang.org/x/sys v0.47.0` (for `TCP_INFO` on Linux).
+
+### Changed
+- Statistics now also report p95/p99 and, when `-rtt` is used, the average
+  kernel RTT.
+- README rewritten: full flags table, p95/p99 + kernel RTT stats, exit code `4`,
+  concurrency/TLS/source-binding/multi-target notes, and examples for every new
+  mode.
+
+### Tests
+- New unit tests: `parseSource`, `parsePortRange`, `parseTargetLine`,
+  `readTargets`, `computeHistogram`, `kernelRTT` on a non-Linux stub, and
+  `emitSummary` exit-code logic (0/3/4).
+- New integration tests: `PingLocalTCP` (real local listener, concurrency +
+  sub-second timeout + source binding) and `PingTLS` (httptest TLS server,
+  handshake timing). 24 tests total, all passing with `-race`.
+
+### Security / robustness (carried over from 0.5.x; now documented)
+- Resolve-once dial (no DNS-rebinding TOCTOU between validation and connect).
+- Bounded sample retention (max 100,000 samples) to cap memory in infinite mode.
+- Input validation for port, timeout, deadline, and interval.
+- Terminal-control sanitization of the hostname in output lines.
+- Signal (SIGINT/SIGTERM) and deadline handling that still prints the summary.
+
 ## [0.6.0] - 2026-07-03
 
 ### Added — capabilities
@@ -57,13 +118,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Resolve-once dial (no DNS-rebinding TOCTOU between validation and connect).
 - Bounded sample retention (max 100,000 samples) to cap memory in infinite mode.
 - Input validation for port, timeout, deadline, and interval.
-- Terminal-control sanitization of the hostname in output lines.
-- Signal (SIGINT/SIGTERM) and deadline handling that still prints the summary.
-
-### Security / robustness (carried over from 0.5.x; now documented)
-- Resolve-once dial (no DNS-rebinding TOCTOU between validation and connect).
-- Bounded sample retention (max 100,000 samples) to cap memory in infinite mode.
-- Input validation for port, timeout, and deadline.
 - Terminal-control sanitization of the hostname in output lines.
 - Signal (SIGINT/SIGTERM) and deadline handling that still prints the summary.
 
