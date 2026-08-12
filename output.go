@@ -37,10 +37,10 @@ func emitSummary(attempts, successful int, samples, kernelSamples []float64, hos
 				Error string `json:"error"`
 				Host  string `json:"host"`
 				Port  int    `json:"port"`
-			}{err.Error(), host, port})
+			}{sanitize(err.Error()), sanitize(host), port})
 			fmt.Fprintln(os.Stderr, string(b))
 		} else {
-			fmt.Fprintf(os.Stderr, "\nAll the requests have failed. The host %s is not replying to connections on %d\n", host, port)
+			fmt.Fprintf(os.Stderr, "\nAll the requests have failed. The host %s is not replying to connections on %d\n", sanitize(host), port)
 		}
 		return exitAllFailed
 	}

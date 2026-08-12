@@ -292,7 +292,11 @@ func emitProbe(pr probeResult, opts options, host string, port int, cw *csv.Writ
 		}
 	default:
 		if !pr.ok {
-			fmt.Fprintf(os.Stderr, "%sFailed to connect to %s on port %d: %v\n", ts, host, port, pr.err)
+			errStr := ""
+			if pr.err != nil {
+				errStr = sanitize(pr.err.Error())
+			}
+			fmt.Fprintf(os.Stderr, "%sFailed to connect to %s on port %d: %s\n", ts, sanitize(host), port, errStr)
 			return
 		}
 		if opts.quiet || opts.json {
