@@ -160,7 +160,7 @@ func main() {
 func pingTarget(host string, port int, family string, opts options) int {
 	resolvedIP, err := resolveHost(host, family)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %s\n", sanitize(err.Error()))
 		return exitResolveFailed
 	}
 	if opts.tls && opts.sni == "" {
@@ -178,7 +178,7 @@ func runFileMode(path string, defaultPort int, family string, opts options) int 
 		return exitUsage
 	}
 	if len(targets) == 0 {
-		fmt.Fprintf(os.Stderr, "error: no targets found in %s\n", path)
+		fmt.Fprintf(os.Stderr, "error: no targets found in %s\n", sanitize(path))
 		return exitUsage
 	}
 
